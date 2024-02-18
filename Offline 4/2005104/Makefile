@@ -2,7 +2,7 @@ main:
 	bison -d 2005104.y
 	flex 2005104.l
 	g++ 2005104.tab.c lex.yy.c
-	./a.out input/test1_i.c
+	./a.out test.c
 
 loop:
 	./sample.out input/loop.c
@@ -33,3 +33,6 @@ test6:
 
 test7:
 	./sample.out input/test7_i.c
+test:
+	./sample.out test.c
+

@@ -5,20 +5,24 @@
 	#include<iostream>
 	#include<fstream>
 	#include<string>
-	#include "2005104_SymbolTable.h"
+	//#include "2005104_SymbolTable.h"
+	#include "2005104_codegenerator.h"
 	using namespace std;
 
 	ofstream logout("log.txt"), parseout("parsetree.txt"),errorout("error.txt");
-	ofstream assemble("code.asm");
 	int yyparse(void);
 	int yylex(void);
 	extern FILE *yyin;
 	SymbolTable table(11);
+	codeGenerator codegen;
 	extern int errorCount;
 	int arraySize=0;
 	bool arrayInsertable;
 	int line=1;
 	int value;
+	int stack_decremented=0;
+	int stack_incremented=2;
+	int levelCount=1;
 	string type;
 	string type_final;
 	bool is_global=true;
@@ -40,39 +44,8 @@
 	vector<variable> vList;
 	vector<param> pList;
 	vector<SymbolInfo*> argList;
-
-	void unit(SymbolInfo* sym){
-		if(sym->child[0]->getType()=="var_declaration"){
-			//var_declaration(sym->child[0]);
-		}else if(sym->child[0]->getType()=="func_declaration"){
-			
-		}else{
-
-		}
-	}
-
-	void program(SymbolInfo* sym){
-		if(sym->child.size()==2){
-			program(sym->child[0]);
-			unit(sym->child[1]);
-		}else{
-			unit(sym->child[0]);
-		}
-	}
-
-	void start(SymbolInfo* sym){
-		assemble<<".MODEL SMALL"<<endl;
-		assemble<<".STACK 1000H"<<endl;
-		assemble<<".DATA"<<endl;
-		assemble<<"\tnumber DB \"00000$\""<<endl;
-		program(sym->child[0]);
-	}
-	void printNewLine(){
-		assemble<<"new_line proc\n\tpush ax\n\tpush dx\n\tmov ah,2\n\tmov dl,0Dh\n\tint 21h\n\tmov ah,2\n\tmov dl,0Ah\n\tint 21h\n\tpop dx\n\tpop ax\n\tret\nnew_line endp"<<endl;
-	}
-	void printOutput(){
-		assemble<<"print_output proc  ;print what is in ax\n\tpush ax\n\tpush bx\n\tpush cx\n\tpush dx\n\tpush si\n\tlea si,number\n\tmov bx,10\n\tadd si,4\n\tcmp ax,0\n\tjnge negate\nprint:\n\txor dx,dx\n\tdiv bx\n\tmov [si],dl\n\tadd [si],'0'\n\tdec si\n\tcmp ax,0\n\tjne print\n\tinc si\n\tlea dx,si\n\tmov ah,9\n\tint 21h\n\tpop si\n\tpop dx\n\tpop cx\n\tpop bx\n\tpop ax\n\tret\nnegate:\n\tpush ax\n\tmov ah,2\n\tmov dl,'-'\n\tint 21h\n\tpop ax\n\tneg ax\n\tjmp print\nprint_output endp"<<endl;
-	}
+	vector<SymbolInfo*> globalVariables;
+	
 %}
 
 %union{
@@ -108,10 +81,7 @@ start : program {
 	$$->endLine= $1->endLine;
 	$$->child.push_back($1);
 	parseout<<$$->printParseTree(1);
-	start($$);
-	printOutput();
-	printNewLine();
-	assemble<<"END main"<<endl;
+	codegen.start($$);
 	logout<<"Total Lines: "<<line<<endl;
 	logout<<"Total Errors: "<<errorCount<<endl;
 }
@@ -241,13 +211,14 @@ func_definition : type_specifier ID LPAREN parameter_list RPAREN compound_statem
 		for(int i=0;i<$4->paraList.size();i++){
 			$2->paraList.push_back($4->paraList[i]);
 			SymbolInfo newSymbol($4->paraList[i]->getName(),$4->paraList[i]->getType());
-			// table.insert(newSymbol);
+			//cout<<table.insert(newSymbol)<<endl;
 		}
 		SymbolInfo newSymbol3(sym->getName(),sym->getType());
 		table.insert(newSymbol3);
 		SymbolInfo* temp=table.lookUp(sym->getName());
 
 		for(int i=0;i<$4->paraList.size();i++){
+			
 			temp->paraList.push_back($4->paraList[i]);
 		}
 
@@ -290,7 +261,9 @@ func_definition : type_specifier ID LPAREN parameter_list RPAREN compound_statem
 			errorCount++;
 		}
 	}
-
+	$$->offset=$6->offset;
+	$$->retVal=stack_incremented-2;
+	stack_incremented=2;
 	pList.clear();
 	logout << "func_definition  : type_specifier ID LPAREN parameter_list RPAREN compound_statement " << endl;
 }
@@ -303,7 +276,7 @@ func_definition : type_specifier ID LPAREN parameter_list RPAREN compound_statem
 	$$->child.push_back($3);
 	$$->child.push_back($4);
 	$$->child.push_back($5);
-
+	$$->offset=$5->offset;
 	SymbolInfo* temp=table.lookUp($2->getName());
 
 	if(!temp){
@@ -315,7 +288,7 @@ func_definition : type_specifier ID LPAREN parameter_list RPAREN compound_statem
 		temp1->retType=$1->type_specifier;
 		temp1->setFunction();
 	}
-
+	stack_decremented=0;
 	logout << "func_definition  : type_specifier ID LPAREN RPAREN compound_statement " << endl;
 }
 ;
@@ -383,6 +356,15 @@ parameter_list : parameter_list COMMA type_specifier ID {
 	temp.name=$2->getName();
 	$2->type_specifier=$1->type_specifier;
 
+	if($1->varType!="void"){
+		SymbolInfo sym(temp.name,temp.type);
+		//cout<<table.insert(sym)<<endl;
+		stack_incremented+=2;
+		SymbolInfo* temp=table.lookUp($2->getName());
+		temp->offset=stack_incremented;
+		temp->isParam=true;
+	}
+
 	pList.push_back(temp);
 
 	$$->paraList.push_back($2);
@@ -422,7 +404,7 @@ compound_statement : lcurl statements RCURL {
 	$$->child.push_back($1);
 	$$->child.push_back($2);
 	$$->child.push_back($3);
-
+	$$->offset=$2->offset;
 	logout << "compound_statement  : LCURL statements RCURL " << endl;
 	logout << table.printAllScopeTable();
 	table.exitScope();
@@ -472,16 +454,22 @@ var_declaration : type_specifier declaration_list SEMICOLON {
 	for(int i=0;i<$2->decList.size();i++){
 		$2->decList[i]->varType=$1->varType;
 		$2->decList[i]->type_specifier=$1->type_specifier;
-		if(table->getCurrScopeId()==1){	
+		SymbolInfo* temp=table.lookUp($2->decList[i]->getName());
+		if(table.getCurrScopeId()==1){	
 			$$->isGlobal=true;
 			temp->isGlobal=true;
-			$2->dec_list[i]->isGlobal=true;
-			global_vars.push_back(temp);
+			$2->decList[i]->isGlobal=true;
+			globalVariables.push_back(temp);
 		}else{
 			temp->isGlobal=false;
-			$2->dec_list[i]->isGlobal=false;
+			$2->decList[i]->isGlobal=false;
+			stack_decremented+=2;
+			//cout<<temp->getName()<<" y"<<endl;
+			temp->offset=stack_decremented;
 		}
 	}
+
+	$$->offset=stack_decremented;
 
 	vList.clear();
 
@@ -551,6 +539,7 @@ declaration_list : declaration_list COMMA ID {
 	if(insertable){
 		SymbolInfo* temp=table.lookUp($3->getName());
 		temp->arraySize=var.size;
+		temp->arraySize=1;
 		temp->isInserted=true;
 		temp->varType=$1->decList[0]->varType;
 		temp->type_specifier=$1->decList[0]->type_specifier;
@@ -614,15 +603,15 @@ declaration_list : declaration_list COMMA ID {
 }
 | ID {
 	$$=new SymbolInfo("ID","declaration_list");
-	$$->decList.push_back($1);
+	
 	SymbolInfo newSymbol($1->getName(),$1->getType());
 	bool insertable=table.insert(newSymbol);
 	
 	if(insertable){
 		SymbolInfo* temp=table.lookUp($1->getName());
-		temp->arraySize=var.size;
+		temp->arraySize=1;
 		temp->isInserted=true;
-
+		$$->decList.push_back(temp);
 		var.name=(string)$1->getName();
 		var.size=0;
 
@@ -632,7 +621,8 @@ declaration_list : declaration_list COMMA ID {
 		errorout<<"Line# "<<line<<": Conflicting types for'"<<$1->getName()<<"' "<<endl;
 		errorCount++;
 	}
-
+	SymbolInfo* temp=table.lookUp($1->getName());
+	cout<<temp->getName()<<" "<<temp->arraySize<<endl;
 	$$->startLine=$1->startLine;
 	$$->endLine=$1->endLine;
 	$$->child.push_back($1);
@@ -681,6 +671,7 @@ statements : statement {
 	$$=new SymbolInfo("statement","statements");
 	$$->startLine=$1->startLine;
 	$$->endLine=$1->endLine;
+	$$->offset=$1->offset;
 	$$->child.push_back($1);
 	logout << "statements : statement" << endl;
 }
@@ -689,6 +680,7 @@ statements : statement {
 	$$->startLine=$1->startLine;
 	$$->endLine=$2->endLine;
 	$$->child.push_back($1);
+	$$->offset=$1->offset+$2->offset;
 	$$->child.push_back($2);
 	logout << "statements  : statements statement " << endl;
 }
@@ -700,6 +692,7 @@ statement : var_declaration {
 	$$->startLine=$1->startLine;
 	$$->endLine=$1->endLine;
 	$$->child.push_back($1);
+	$$->offset=$1->offset;
 	logout << "statement  : var_declaration " << endl;
 }
 | expression_statement {
@@ -717,15 +710,15 @@ statement : var_declaration {
 	logout << "statement  : compound_statement " << endl;
 }
 | FOR LPAREN expression_statement embedded_exp embedded_void expression_statement embedded_exp embedded_void expression embedded_exp embedded_void RPAREN statement {
-	$$=new SymbolInfo("FOR LPAREN expression_statement expression RPAREN statement","statement");
+	$$=new SymbolInfo("FOR LPAREN expression_statement expression_statement expression RPAREN statement","statement");
 	$$->startLine=$1->startLine;
 	$$->endLine=$13->endLine;
 	$$->child.push_back($1);
 	$$->child.push_back($2);
 	$$->child.push_back($3);
-	$$->child.push_back($9);
-	$$->child.push_back($12);
 	$$->child.push_back($6);
+	$$->child.push_back($9);//12
+	$$->child.push_back($12);
 	$$->child.push_back($13);
 	logout << "statement  : FOR LPAREN expression_statement expression_statement expression RPAREN statement " << endl;
 }
@@ -747,10 +740,10 @@ statement : var_declaration {
 	$$->child.push_back($1);
 	$$->child.push_back($2);
 	$$->child.push_back($3);
-	$$->child.push_back($9);
-	$$->child.push_back($5);
-	$$->child.push_back($8);
+	$$->child.push_back($5);//9
 	$$->child.push_back($7);
+	$$->child.push_back($8);
+	$$->child.push_back($9);
 		
 	logout << "statement  : IF LPAREN expression RPAREN statement ELSE statement " << endl;
 }
@@ -761,19 +754,26 @@ statement : var_declaration {
 	$$->child.push_back($1);
 	$$->child.push_back($2);
 	$$->child.push_back($3);
-	$$->child.push_back($7);
 	$$->child.push_back($5);
+	$$->child.push_back($7);
 	logout << "statement  : WHILE LPAREN expression RPAREN statement " << endl;
 }
 | PRINTLN LPAREN ID RPAREN SEMICOLON {
 	$$=new SymbolInfo("PRINTLN LPAREN ID RPAREN SEMICOLON","statement");
 	$$->startLine=$1->startLine;
 	$$->endLine=$5->endLine;
+	SymbolInfo* temp=table.lookUp($3->getName());
+	//cout<<temp->getName()<<" "<<temp->offset<<endl;
+	$3->offset=temp->offset;
+	//SymbolInfo* temp=table->LookUp($3->getName());
+	//$$->isGlobal=temp->isGlobal;
+	// $$->offset=temp->offset;
 	$$->child.push_back($1);
 	$$->child.push_back($2);
 	$$->child.push_back($3);
 	$$->child.push_back($4);
 	$$->child.push_back($5);
+	//cout<<"ghghhg"<<endl;
 	logout << "statement  : PRINTLN LPAREN ID RPAREN SEMICOLON ";
 }
 | RETURN expression SEMICOLON {
@@ -836,7 +836,11 @@ variable : ID {
 			$$->varType="float";
 		}
 	}
-
+	$$->varName=$1->getName();
+	$$->isParam=temp->isParam;
+	$$->offset=temp->offset;
+	$$->isGlobal=temp->isGlobal;
+	cout<<temp->getName()<<" "<<temp->isParam<<" "<<temp->offset<<endl;
 	$$->startLine=$1->startLine;
 	$$->endLine=$1->endLine;
 	$$->child.push_back($1);
@@ -868,6 +872,8 @@ variable : ID {
 		errorout<<"Line# "<<line<<": Array subscript is not an integer "<<endl;
 		errorCount++;
 	}
+	// $$->offset=temp->offset;
+	$$->isGlobal=temp->isGlobal;
 	$$->startLine=$1->startLine;
 	$$->endLine=$4->endLine;
 	$$->child.push_back($1);
@@ -926,7 +932,7 @@ logic_expression : rel_expression {
 	$$->endLine=$1->endLine;
 	$$->child.push_back($1);
 	$$->arraySize=$1->arraySize;
-
+	$$->varVal=$1->varVal;
 	logout << "logic_expression  : rel_expression " << endl;
 }
 | rel_expression LOGICOP rel_expression {
@@ -949,6 +955,7 @@ rel_expression : simple_expression {
 	$$->endLine=$1->endLine;
 	$$->child.push_back($1);
 	$$->arraySize=$1->arraySize;
+	$$->varVal=$1->varVal;
 	logout << "rel_expression  : simple_expression " << endl;
 }
 | simple_expression RELOP simple_expression {
@@ -970,6 +977,7 @@ simple_expression : term {
 	$$->endLine=$1->endLine;
 	$$->child.push_back($1);
 	$$->varType=$1->varType;
+	$$->varVal=$1->varVal;
 	$$->arraySize=$1->arraySize;
 	logout << "simple_expression  : term " << endl;
 }
@@ -1002,6 +1010,7 @@ term : unary_expression {
 	$$->child.push_back($1);
 	$$->varType=$1->varType;
 	$$->arraySize=$1->arraySize;
+	$$->varVal=$1->varVal;
 	logout << "term  : unary_expression " << endl;
 }
 | term MULOP unary_expression {
@@ -1065,7 +1074,7 @@ unary_expression : ADDOP unary_expression {
 	$$->child.push_back($1);
 	$$->varType=$1->varType;
 	$$->arraySize=$1->arraySize;
-
+	$$->varVal=$1->varVal;
 	logout << "unary_expression  : factor " << endl;
 }
 ;
@@ -1137,6 +1146,7 @@ factor : variable {
 	$$->child.push_back($1);
 	$$->varType="int";
 	value=stoi($1->getName());
+	$$->varVal=value;
 	logout << "factor  : CONST_INT " << endl;
 }
 | CONST_FLOAT {
@@ -1171,6 +1181,7 @@ argument_list : arguments {
 	$$=new SymbolInfo("arguments","argument_list");
 	$$->startLine=$1->startLine;
 	$$->endLine=$1->endLine;
+	// $$->offset=$1->offset;
 	$$->child.push_back($1);
 
 	for(int i=0;i<$1->argList.size();i++){
@@ -1198,6 +1209,7 @@ arguments : arguments COMMA logic_expression {
 
 	$$->startLine=$1->startLine;
 	$$->endLine=$3->endLine;
+	// $$->offset=$1->offset+2;
 	$$->child.push_back($1);
 	$$->child.push_back($2);
 	$$->child.push_back($3);
@@ -1217,6 +1229,7 @@ arguments : arguments COMMA logic_expression {
 	}
 	$$->startLine=$1->startLine;
 	$$->endLine=$1->endLine;
+	// $$->offset=2;
 	$$->child.push_back($1);
 	argList.push_back($1);
 	$$->argList.push_back($1);

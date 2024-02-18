@@ -20,7 +20,7 @@ extern ofstream tokenout;
 extern int error;
 extern int line;
 extern YYSTYPE yylval;
-extern SymbolTable *table;
+extern SymbolTable table;
 void yyerror(char* c);
 
 int errorCount = 0;
@@ -321,6 +321,8 @@ EXP (E[+-]?{DIGITS})
 			SymbolInfo *sym= new  SymbolInfo(yytext, "ID");
 			yylval.symbol =sym;
 			sym->startLine=line;
+			// SymbolInfo *temp= table.lookUp(yytext);
+			// sym->offset=temp->offset;
 			sym->endLine=line;
 			sym->isLeaf=true;
 			logout<<"Line# "<<line<<": Token <ID> Lexeme "<<yytext<<" found"<<endl;

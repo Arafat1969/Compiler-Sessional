@@ -24,11 +24,20 @@ class SymbolInfo{
     int arraySize=0;
     int startLine; 
     int endLine;    
-    bool isInserted; 
+    bool isInserted;
+    string isEnd="";
+    string isTrue="";
+    string isFalse=""; 
+    int offset=0; 
+    string varName;
+    int varVal;
+    int retVal;
+    bool isParam=false;
     vector<SymbolInfo*> child;
     bool isDeclared;
     bool isDefined;
-    bool isGlobal;
+    bool isGlobal=false;
+    bool isCond;
     bool isLeaf;
     vector<SymbolInfo*> paraList;
     vector<SymbolInfo*> decList; 
@@ -346,4 +355,4 @@ class SymbolTable{
     }
 };
 
-#endif 
+#endif
